@@ -5,6 +5,16 @@ torch>=2.0.0
 torchvision>=0.15.0
 numpy>=1.24.0
 scikit-learn>=1.3.0
+scipy>=1.11.0  # Signal processing for industrial analytics
+
+# Reinforcement Learning
+stable-baselines3>=2.2.1  # PPO/A3C for device scheduling
+gymnasium>=0.29.0  # OpenAI Gym fork (replaces gym)
+
+# Imitation Learning / Generative Models
+diffusers>=0.25.0  # Diffusion models for IL policies
+transformers>=4.36.0  # Transformer models (ACT, GPT-based policies)
+einops>=0.7.0  # Tensor operations for attention mechanisms
 
 # Federated Learning
 flwr>=1.7.0  # Flower framework
@@ -30,6 +40,12 @@ pillow>=10.0.0
 cryptography>=41.0.0
 pycryptodome>=3.19.0
 # openfhe  # Install separately (see crypto/fhe/openfhe_integration.md)
+
+# Zero-Knowledge Proofs (zkRep reputation system)
+# snarkjs and circom are Node.js packages - install via npm:
+#   npm install -g snarkjs circom
+# Python wrapper for snarkjs (optional, for subprocess integration)
+# py-snarkjs  # Uncomment if using Python wrapper
 
 # Graph processing (for task graphs)
 networkx>=3.0

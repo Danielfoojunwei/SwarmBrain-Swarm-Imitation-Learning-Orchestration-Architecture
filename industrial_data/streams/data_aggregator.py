@@ -20,6 +20,7 @@ from industrial_data.protocols.opcua_client import OPCUAClient, OPCUATag, TagVal
 from industrial_data.protocols.mqtt_client import MQTTClient, MQTTMessage
 from industrial_data.collectors.mes_collector import MESCollector, WorkOrder
 from industrial_data.models.isa95_models import Equipment, ProductionRequest
+from industrial_data.analytics import OEECalculator, EquipmentHealthMonitor
 
 
 @dataclass
@@ -64,6 +65,10 @@ class IndustrialDataAggregator:
         self.scada_data: Dict[str, TagValue] = {}
         self.iot_data: Dict[str, Any] = {}
         self.work_orders: List[WorkOrder] = []
+
+        # Analytics modules
+        self.oee_calculator = OEECalculator()
+        self.health_monitor = EquipmentHealthMonitor()
 
         # Callbacks for data updates
         self.update_callbacks: List[Callable[[AggregatedData], None]] = []
@@ -237,13 +242,24 @@ class IndustrialDataAggregator:
 
     def get_aggregated_data(self) -> AggregatedData:
         """Get current aggregated data from all sources."""
+        # Calculate production metrics using OEE calculator
+        production_metrics = self.oee_calculator.calculate(
+            scada_data=self.scada_data,
+            work_orders=self.work_orders
+        )
+
+        # Get equipment health metrics
+        equipment_status = self.health_monitor.get_health_metrics(
+            sensor_data=self.iot_data
+        )
+
         return AggregatedData(
             timestamp=datetime.utcnow(),
             scada_tags=self.scada_data.copy(),
             iot_sensors=self.iot_data.copy(),
             work_orders=self.work_orders.copy(),
-            production_metrics={},  # TODO: Implement
-            equipment_status={}  # TODO: Implement
+            production_metrics=production_metrics,
+            equipment_status=equipment_status
         )
 
     def get_tag_value(self, source_id: str, tag_name: str) -> Optional[TagValue]:

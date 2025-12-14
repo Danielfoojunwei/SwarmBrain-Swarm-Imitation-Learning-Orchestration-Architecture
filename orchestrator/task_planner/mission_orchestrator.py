@@ -3,6 +3,8 @@ Mission Orchestrator Service
 
 Transforms work orders into task graphs and coordinates multi-robot missions.
 Uses behavior trees for workflow modeling and supports Open-RMF integration.
+
+REFACTORED: Now uses unified skill registry instead of local skill management.
 """
 
 from typing import List, Dict, Any, Optional, Set
@@ -12,6 +14,12 @@ import asyncio
 import logging
 from datetime import datetime
 import networkx as nx
+
+# Import unified skill registry
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from registry import UnifiedSkillRegistryClient, SkillDefinition, SkillType
 
 
 class TaskStatus(Enum):
@@ -105,13 +113,26 @@ class MissionOrchestrator:
     """
     Main orchestrator service that converts work orders into task graphs
     and coordinates robot execution.
+
+    REFACTORED: Uses UnifiedSkillRegistryClient for skill discovery instead
+    of local skill management.
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        csa_registry_url: str = "http://localhost:8082",
+        dynamical_api_url: str = "http://localhost:8085",
+    ):
         self.logger = logging.getLogger(__name__)
         self.active_missions: Dict[str, TaskGraph] = {}
         self.robot_registry: Dict[str, Dict[str, Any]] = {}
-        self.skill_registry: Set[str] = set()
+
+        # Use unified skill registry client
+        self.skill_registry_client = UnifiedSkillRegistryClient(
+            csa_registry_url=csa_registry_url,
+            dynamical_api_url=dynamical_api_url,
+        )
+        self.logger.info("MissionOrchestrator initialized with unified skill registry")
 
     def register_robot(
         self,
@@ -128,14 +149,38 @@ class MissionOrchestrator:
         }
         self.logger.info(f'Registered robot {robot_id} with capabilities: {capabilities}')
 
-    def register_skill(self, skill_name: str):
-        """Register a skill that robots can execute."""
-        self.skill_registry.add(skill_name)
-        self.logger.info(f'Registered skill: {skill_name}')
+    def list_available_skills(
+        self,
+        skill_type: Optional[SkillType] = None,
+    ) -> List[SkillDefinition]:
+        """
+        List available skills from unified registry.
+
+        Args:
+            skill_type: Filter by skill type (single_actor, multi_actor, hybrid)
+
+        Returns:
+            List of available skill definitions
+        """
+        return self.skill_registry_client.list_skills(skill_type=skill_type)
+
+    def get_skill_info(self, skill_id: str) -> Optional[SkillDefinition]:
+        """
+        Get skill information from registry.
+
+        Args:
+            skill_id: Skill identifier
+
+        Returns:
+            Skill definition or None if not found
+        """
+        return self.skill_registry_client.get_skill(skill_id)
 
     def create_mission(self, work_order: WorkOrder) -> TaskGraph:
         """
         Convert a work order into an executable task graph.
+
+        REFACTORED: Validates skills against unified registry instead of local storage.
 
         Args:
             work_order: The work order to plan
@@ -147,13 +192,32 @@ class MissionOrchestrator:
 
         # Create tasks from work order
         for task_spec in work_order.tasks:
+            skill_name = task_spec['skill']
+
+            # Validate skill exists in registry
+            skill_def = self.skill_registry_client.get_skill(skill_name)
+            if not skill_def:
+                # Try searching by name
+                matches = self.skill_registry_client.search_skills(skill_name)
+                if matches:
+                    skill_def = matches[0]
+                    self.logger.warning(
+                        f"Skill '{skill_name}' not found by ID, using '{skill_def.skill_id}' from search"
+                    )
+                else:
+                    raise ValueError(f"Skill '{skill_name}' not found in registry")
+
+            # Store skill metadata in task
+            task_metadata = task_spec.get('metadata', {})
+            task_metadata['skill_definition'] = skill_def
+
             task = Task(
                 task_id=f"{work_order.order_id}_{task_spec['id']}",
-                skill=task_spec['skill'],
+                skill=skill_def.skill_id,  # Use skill ID from registry
                 role=task_spec.get('role', 'default'),
                 dependencies=task_spec.get('dependencies', []),
                 coordination=self._parse_coordination(task_spec.get('coordination')),
-                metadata=task_spec.get('metadata', {})
+                metadata=task_metadata,
             )
             task_graph.add_task(task)
 
@@ -182,6 +246,8 @@ class MissionOrchestrator:
         """
         Assign ready tasks to available robots.
 
+        REFACTORED: Uses skill definitions from registry to match robot capabilities.
+
         Args:
             mission_id: ID of the mission to assign tasks for
 
@@ -201,10 +267,22 @@ class MissionOrchestrator:
         assignments = {}
 
         for task in ready_tasks:
-            # Find a robot with the required skill
+            # Get skill definition from task metadata
+            skill_def = task.metadata.get('skill_definition')
+
+            if not skill_def:
+                # Fallback: fetch from registry
+                skill_def = self.skill_registry_client.get_skill(task.skill)
+
+            required_capabilities = skill_def.required_capabilities if skill_def else [task.skill]
+
+            # Find a robot with the required capabilities
             for robot_id in available_robots:
                 robot_info = self.robot_registry[robot_id]
-                if task.skill in robot_info['capabilities']:
+                robot_capabilities = set(robot_info['capabilities'])
+
+                # Check if robot has all required capabilities
+                if all(cap in robot_capabilities for cap in required_capabilities):
                     # Assign task to robot
                     task.status = TaskStatus.ASSIGNED
                     task.assigned_robot = robot_id

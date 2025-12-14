@@ -35,6 +35,9 @@ import hashlib
 import json
 import subprocess
 import logging
+from pathlib import Path
+
+from crypto.zkp.snarkjs_wrapper import SnarkjsWrapper
 
 
 class ReputationTier(Enum):
@@ -67,24 +70,54 @@ class ZKRepSystem:
         self,
         circuit_path: Optional[str] = None,
         proving_key_path: Optional[str] = None,
-        verification_key_path: Optional[str] = None
+        verification_key_path: Optional[str] = None,
+        use_real_proofs: bool = True
     ):
         """
         Initialize zkRep system.
 
         Args:
             circuit_path: Path to compiled Circom circuit
-            proving_key_path: Path to proving key
-            verification_key_path: Path to verification key
+            proving_key_path: Path to proving key (deprecated, auto-generated)
+            verification_key_path: Path to verification key (deprecated, auto-generated)
+            use_real_proofs: Whether to use real ZK proofs (True) or mock proofs for testing (False)
         """
-        self.circuit_path = circuit_path
-        self.proving_key_path = proving_key_path
-        self.verification_key_path = verification_key_path
+        self.circuit_path = circuit_path or "circuits/reputation_tier.circom"
+        self.use_real_proofs = use_real_proofs
 
         self.logger = logging.getLogger(__name__)
 
+        # Initialize snarkjs wrapper if using real proofs
+        if self.use_real_proofs:
+            try:
+                self.snarkjs = SnarkjsWrapper(
+                    circuit_path=self.circuit_path,
+                    protocol="groth16"
+                )
+
+                # Setup circuit if not already done
+                if not self.snarkjs.is_setup_complete():
+                    self.logger.info("Setting up zkRep circuit (one-time setup)...")
+                    self.snarkjs.compile_circuit()
+                    self.snarkjs.generate_keys()
+                    self.logger.info("Circuit setup complete")
+
+            except Exception as e:
+                self.logger.warning(
+                    f"Failed to initialize snarkjs: {e}. "
+                    "Falling back to mock proofs. Install snarkjs/circom: "
+                    "npm install -g snarkjs circom"
+                )
+                self.use_real_proofs = False
+                self.snarkjs = None
+        else:
+            self.snarkjs = None
+
         # Reputation database (in production, use secure storage)
         self.reputations: Dict[str, ReputationScore] = {}
+
+        # Salt storage for commitments (in production, use secure storage)
+        self.robot_salts: Dict[str, int] = {}
 
         # Tier thresholds
         self.tier_thresholds = {
@@ -193,35 +226,70 @@ class ZKRepSystem:
             )
             return None
 
-        # Generate proof using Circom circuit
-        # In production, this would call snarkjs via subprocess
+        # Generate or retrieve salt for commitment
+        if robot_id not in self.robot_salts:
+            import random
+            self.robot_salts[robot_id] = random.randint(1, 2**64)
 
-        # For now, return a mock proof structure
-        proof = {
-            'proof': {
-                'pi_a': ['0x...', '0x...', '0x...'],  # G1 point
-                'pi_b': [['0x...', '0x...'], ['0x...', '0x...'], ['0x...', '0x...']],  # G2 point
-                'pi_c': ['0x...', '0x...', '0x...'],  # G1 point
-            },
-            'public_inputs': [
-                str(claimed_tier.value),  # Public: claimed tier
-                self._hash_robot_id(robot_id),  # Public: commitment to robot ID
-            ],
-            'protocol': 'groth16',
-            'curve': 'bn128'
-        }
+        salt = self.robot_salts[robot_id]
 
-        self.logger.info(
-            f"Generated ZK proof for {robot_id} claiming tier {claimed_tier.name}"
-        )
+        # Use real ZK proofs if enabled
+        if self.use_real_proofs and self.snarkjs:
+            try:
+                # Convert robot_id to numeric hash for circuit input
+                robot_id_numeric = int(hashlib.sha256(robot_id.encode()).hexdigest()[:16], 16)
 
-        return proof
+                # Prepare witness (private + public inputs)
+                witness = {
+                    "reputation_score": int(reputation.score),
+                    "robot_id": robot_id_numeric,
+                    "salt": salt,
+                    "claimed_tier": claimed_tier.value
+                }
+
+                # Generate proof using snarkjs
+                proof = self.snarkjs.generate_proof(witness)
+
+                self.logger.info(
+                    f"Generated real ZK proof for {robot_id} claiming tier {claimed_tier.name}"
+                )
+
+                return proof
+
+            except Exception as e:
+                self.logger.error(f"Failed to generate ZK proof: {e}")
+                return None
+
+        else:
+            # Fallback to mock proof (for testing without snarkjs)
+            robot_commitment = self._hash_robot_id(robot_id)
+
+            proof = {
+                'proof': {
+                    'pi_a': ['0x...', '0x...', '0x...'],  # G1 point
+                    'pi_b': [['0x...', '0x...'], ['0x...', '0x...'], ['0x...', '0x...']],  # G2 point
+                    'pi_c': ['0x...', '0x...', '0x...'],  # G1 point
+                },
+                'publicSignals': [
+                    str(claimed_tier.value),  # Public: claimed tier
+                    robot_commitment,  # Public: commitment to robot ID (simplified)
+                ],
+                'protocol': 'groth16',
+                'curve': 'bn128'
+            }
+
+            self.logger.warning(
+                f"Generated MOCK ZK proof for {robot_id} claiming tier {claimed_tier.name}. "
+                "Install snarkjs/circom for real proofs."
+            )
+
+            return proof
 
     def verify_reputation_proof(
         self,
         proof: Dict[str, any],
         claimed_tier: ReputationTier,
-        robot_commitment: str
+        robot_commitment: Optional[str] = None
     ) -> bool:
         """
         Verify a reputation proof.
@@ -229,41 +297,61 @@ class ZKRepSystem:
         Args:
             proof: ZK proof to verify
             claimed_tier: Claimed reputation tier
-            robot_commitment: Commitment to robot ID (hash)
+            robot_commitment: Commitment to robot ID (optional, extracted from proof if not provided)
 
         Returns:
             True if proof is valid, False otherwise
         """
-        # In production, this would call snarkjs verification
-        # snarkjs groth16 verify verification_key.json public.json proof.json
-
-        # For now, perform basic validation
-        if not proof or 'proof' not in proof:
+        if not proof or ('proof' not in proof and 'publicSignals' not in proof):
+            self.logger.error("Invalid proof structure")
             return False
 
-        if proof.get('protocol') != 'groth16':
-            self.logger.warning(f"Unsupported proof protocol: {proof.get('protocol')}")
-            return False
+        # Use real verification if enabled
+        if self.use_real_proofs and self.snarkjs:
+            try:
+                # Verify proof using snarkjs
+                is_valid = self.snarkjs.verify_proof(proof)
 
-        # Verify public inputs match
-        public_inputs = proof.get('public_inputs', [])
-        if len(public_inputs) != 2:
-            return False
+                if is_valid:
+                    self.logger.info(
+                        f"Verified real ZK proof for tier {claimed_tier.name}"
+                    )
+                else:
+                    self.logger.warning(
+                        f"ZK proof verification failed for tier {claimed_tier.name}"
+                    )
 
-        if public_inputs[0] != str(claimed_tier.value):
-            return False
+                return is_valid
 
-        if public_inputs[1] != robot_commitment:
-            return False
+            except Exception as e:
+                self.logger.error(f"Failed to verify ZK proof: {e}")
+                return False
 
-        # In production, verify the actual cryptographic proof here
-        # using snarkjs or libsnark
+        else:
+            # Fallback to mock verification (basic validation)
+            if proof.get('protocol') != 'groth16':
+                self.logger.warning(f"Unsupported proof protocol: {proof.get('protocol')}")
+                return False
 
-        self.logger.info(
-            f"Verified ZK proof for tier {claimed_tier.name}"
-        )
+            # Verify public inputs match
+            public_signals = proof.get('publicSignals', proof.get('public_inputs', []))
+            if len(public_signals) != 2:
+                return False
 
-        return True
+            if public_signals[0] != str(claimed_tier.value):
+                return False
+
+            # If robot_commitment provided, verify it matches
+            if robot_commitment and public_signals[1] != robot_commitment:
+                return False
+
+            # Mock verification: accept all proofs with valid structure
+            self.logger.warning(
+                f"MOCK verification for tier {claimed_tier.name}. "
+                "Install snarkjs/circom for real verification."
+            )
+
+            return True
 
     def get_contribution_weight(
         self,
@@ -291,12 +379,15 @@ class ZKRepSystem:
 
         # If proof provided, verify and potentially upgrade weight
         if proof:
-            claimed_tier = ReputationTier(int(proof['public_inputs'][0]))
-            robot_commitment = self._hash_robot_id(robot_id)
+            # Extract claimed tier from public signals
+            public_signals = proof.get('publicSignals', proof.get('public_inputs', []))
+            if public_signals:
+                claimed_tier = ReputationTier(int(public_signals[0]))
+                robot_commitment = self._hash_robot_id(robot_id)
 
-            if self.verify_reputation_proof(proof, claimed_tier, robot_commitment):
-                # Use claimed tier weight
-                return self.tier_weights[claimed_tier]
+                if self.verify_reputation_proof(proof, claimed_tier, robot_commitment):
+                    # Use claimed tier weight
+                    return self.tier_weights[claimed_tier]
 
         # Use stored tier weight
         return self.tier_weights[reputation.tier]
@@ -351,27 +442,18 @@ class ZKRepSystem:
         }
 
 
-# TODO: Implement actual Circom circuit for reputation proofs
+# Circom circuit for reputation proofs has been implemented!
+# See: circuits/reputation_tier.circom
+# Wrapper: crypto/zkp/snarkjs_wrapper.py
 #
-# Example circuit (reputation_tier.circom):
+# The circuit proves: reputation_score >= tier_threshold
+# Without revealing the exact score (zero-knowledge proof)
 #
-# pragma circom 2.0.0;
+# To use real ZK proofs:
+#   1. Install snarkjs and circom: npm install -g snarkjs circom
+#   2. Initialize zkRep with use_real_proofs=True (default)
+#   3. Circuit will auto-compile and generate keys on first use
 #
-# template ReputationProof() {
-#     signal input reputation_score;  // Private
-#     signal input robot_id_hash;     // Private
-#     signal input claimed_tier;      // Public
-#
-#     signal output commitment;       // Public
-#
-#     // Prove: reputation_score >= tier_threshold
-#     component tier_check = GreaterEqThan(32);
-#     tier_check.in[0] <== reputation_score;
-#     tier_check.in[1] <== claimed_tier * 25;  // Tier thresholds
-#     tier_check.out === 1;
-#
-#     // Commitment to robot ID
-#     commitment <== robot_id_hash;
-# }
-#
-# component main = ReputationProof();
+# For testing without snarkjs:
+#   - Initialize with use_real_proofs=False
+#   - Falls back to mock proofs (structure validation only)

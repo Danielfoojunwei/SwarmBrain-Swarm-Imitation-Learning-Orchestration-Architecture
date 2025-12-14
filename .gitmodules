@@ -2,3 +2,7 @@
 	path = external/dynamical_2
 	url = https://github.com/Danielfoojunwei/dynamical_2.git
 	branch = main
+[submodule "external/multi_actor"]
+	path = external/multi_actor
+	url = https://github.com/Danielfoojunwei/SwarmBridge-Multi-Actor-Swarm-Imitation-Learning-Architecture.git
+	branch = main
