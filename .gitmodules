@@ -1,0 +1,4 @@
+[submodule "external/dynamical_2"]
+	path = external/dynamical_2
+	url = https://github.com/Danielfoojunwei/dynamical_2.git
+	branch = main

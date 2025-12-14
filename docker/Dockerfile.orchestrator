@@ -1,0 +1,48 @@
+# SwarmBrain Mission Orchestrator Dockerfile
+
+FROM python:3.10-slim
+
+# Metadata
+LABEL maintainer="SwarmBrain Team"
+LABEL description="Mission orchestrator microservice for multi-robot coordination"
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl \
+    git \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create workspace
+WORKDIR /workspace
+
+# Copy requirements and install dependencies
+COPY requirements.txt /workspace/
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY orchestrator /workspace/orchestrator
+COPY interfaces /workspace/interfaces
+COPY config /workspace/config
+
+# Create non-root user for security
+RUN useradd -m -u 1000 swarm && \
+    chown -R swarm:swarm /workspace
+
+USER swarm
+
+# Expose ports
+EXPOSE 8000 50051
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Run orchestrator service
+CMD ["python", "-m", "uvicorn", "orchestrator.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

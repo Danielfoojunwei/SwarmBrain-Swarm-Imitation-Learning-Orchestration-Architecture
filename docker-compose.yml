@@ -1,0 +1,338 @@
+version: '3.8'
+
+services:
+  # ==========================================================================
+  # Robot Simulator (for testing)
+  # ==========================================================================
+  robot-sim-1:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.robot
+    container_name: swarm_robot_1
+    environment:
+      - ROBOT_ID=robot_001
+      - ROS_NAMESPACE=swarm
+      - ROS_DOMAIN_ID=42
+      - FL_SERVER_ADDRESS=fl-server:8080
+    volumes:
+      - ./robot_control:/workspace/robot_control
+      - ./config:/workspace/config
+    networks:
+      - swarm-network
+    depends_on:
+      - orchestrator
+      - fl-server
+
+  robot-sim-2:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.robot
+    container_name: swarm_robot_2
+    environment:
+      - ROBOT_ID=robot_002
+      - ROS_NAMESPACE=swarm
+      - ROS_DOMAIN_ID=42
+      - FL_SERVER_ADDRESS=fl-server:8080
+    volumes:
+      - ./robot_control:/workspace/robot_control
+      - ./config:/workspace/config
+    networks:
+      - swarm-network
+    depends_on:
+      - orchestrator
+      - fl-server
+
+  robot-sim-3:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.robot
+    container_name: swarm_robot_3
+    environment:
+      - ROBOT_ID=robot_003
+      - ROS_NAMESPACE=swarm
+      - ROS_DOMAIN_ID=42
+      - FL_SERVER_ADDRESS=fl-server:8080
+    volumes:
+      - ./robot_control:/workspace/robot_control
+      - ./config:/workspace/config
+    networks:
+      - swarm-network
+    depends_on:
+      - orchestrator
+      - fl-server
+
+  # ==========================================================================
+  # Mission Orchestrator
+  # ==========================================================================
+  orchestrator:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.orchestrator
+    container_name: swarm_orchestrator
+    ports:
+      - "8000:8000"  # FastAPI REST API
+      - "50051:50051"  # gRPC
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+      - DATABASE_URL=postgresql://swarm:swarm@postgres:5432/swarmdb
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./orchestrator:/workspace/orchestrator
+      - ./interfaces:/workspace/interfaces
+      - ./config:/workspace/config
+    networks:
+      - swarm-network
+    depends_on:
+      - postgres
+      - redis
+      - rabbitmq
+
+  # ==========================================================================
+  # Federated Learning Server
+  # ==========================================================================
+  fl-server:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.fl-server
+    container_name: swarm_fl_server
+    ports:
+      - "8080:8080"  # Flower gRPC
+      - "8081:8081"  # Monitoring dashboard
+    environment:
+      - PYTHONUNBUFFERED=1
+      - NUM_ROUNDS=100
+      - MIN_CLIENTS=3
+      - MIN_AVAILABLE_CLIENTS=3
+      - SECURE_AGGREGATION=true
+      - REDIS_URL=redis://redis:6379/1
+    volumes:
+      - ./learning:/workspace/learning
+      - ./crypto:/workspace/crypto
+      - ./config:/workspace/config
+      - fl-models:/workspace/models
+    networks:
+      - swarm-network
+    depends_on:
+      - redis
+
+  # ==========================================================================
+  # Database (PostgreSQL)
+  # ==========================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: swarm_postgres
+    environment:
+      - POSTGRES_USER=swarm
+      - POSTGRES_PASSWORD=swarm
+      - POSTGRES_DB=swarmdb
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./config/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - swarm-network
+
+  # ==========================================================================
+  # Redis (for caching and pub/sub)
+  # ==========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: swarm_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - swarm-network
+
+  # ==========================================================================
+  # RabbitMQ (message broker)
+  # ==========================================================================
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: swarm_rabbitmq
+    environment:
+      - RABBITMQ_DEFAULT_USER=swarm
+      - RABBITMQ_DEFAULT_PASS=swarm
+    ports:
+      - "5672:5672"   # AMQP
+      - "15672:15672" # Management UI
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - swarm-network
+
+  # ==========================================================================
+  # Prometheus (metrics collection)
+  # ==========================================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: swarm_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - swarm-network
+
+  # ==========================================================================
+  # Grafana (metrics visualization)
+  # ==========================================================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: swarm_grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=grafana-clock-panel
+    volumes:
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources
+      - grafana-data:/var/lib/grafana
+    networks:
+      - swarm-network
+    depends_on:
+      - prometheus
+
+  # ==========================================================================
+  # Gazebo Simulation (optional, for full robot simulation)
+  # ==========================================================================
+  gazebo:
+    image: osrf/ros:humble-desktop-full
+    container_name: swarm_gazebo
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - ROS_DOMAIN_ID=42
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ./simulation:/workspace/simulation
+    network_mode: host
+    privileged: true
+    profiles:
+      - simulation
+
+  # ==========================================================================
+  # MQTT Broker (Eclipse Mosquitto) - for IoT sensors
+  # ==========================================================================
+  mqtt-broker:
+    image: eclipse-mosquitto:2
+    container_name: swarm_mqtt
+    ports:
+      - "1883:1883"   # MQTT
+      - "9001:9001"   # WebSocket
+    volumes:
+      - ./config/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-logs:/mosquitto/log
+    networks:
+      - swarm-network
+
+  # ==========================================================================
+  # OPC UA Server Simulator - for SCADA/PLC testing
+  # ==========================================================================
+  opcua-server:
+    image: mcr.microsoft.com/iotedge/opc-plc:latest
+    container_name: swarm_opcua
+    ports:
+      - "50000:50000"  # OPC UA endpoint
+    environment:
+      - PLC_SIMULATION_MODE=True
+      - PLC_SIMULATION_INSTANCES=5
+    networks:
+      - swarm-network
+    profiles:
+      - industrial
+
+  # ==========================================================================
+  # InfluxDB - Time-series database for industrial metrics
+  # ==========================================================================
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: swarm_influxdb
+    ports:
+      - "8086:8086"
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=admin
+      - DOCKER_INFLUXDB_INIT_PASSWORD=adminpassword
+      - DOCKER_INFLUXDB_INIT_ORG=swarm
+      - DOCKER_INFLUXDB_INIT_BUCKET=production
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=swarm-admin-token
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+      - influxdb-config:/etc/influxdb2
+    networks:
+      - swarm-network
+
+  # ==========================================================================
+  # Chronograf - InfluxDB visualization (optional)
+  # ==========================================================================
+  chronograf:
+    image: chronograf:1.10-alpine
+    container_name: swarm_chronograf
+    ports:
+      - "8888:8888"
+    environment:
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_TOKEN=swarm-admin-token
+    volumes:
+      - chronograf-data:/var/lib/chronograf
+    networks:
+      - swarm-network
+    depends_on:
+      - influxdb
+    profiles:
+      - industrial
+
+  # ==========================================================================
+  # Industrial Data Aggregator - Collects from SCADA/MES/IoT
+  # ==========================================================================
+  industrial-aggregator:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.industrial
+    container_name: swarm_industrial_aggregator
+    environment:
+      - PYTHONUNBUFFERED=1
+      - OPCUA_ENDPOINT=opc.tcp://opcua-server:50000
+      - MQTT_BROKER=mqtt-broker:1883
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_TOKEN=swarm-admin-token
+      - ORCHESTRATOR_URL=http://orchestrator:8000
+    volumes:
+      - ./industrial_data:/workspace/industrial_data
+      - ./config:/workspace/config
+    networks:
+      - swarm-network
+    depends_on:
+      - mqtt-broker
+      - influxdb
+      - orchestrator
+    profiles:
+      - industrial
+
+networks:
+  swarm-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  rabbitmq-data:
+  prometheus-data:
+  grafana-data:
+  fl-models:
+  mosquitto-data:
+  mosquitto-logs:
+  influxdb-data:
+  influxdb-config:
+  chronograf-data:
