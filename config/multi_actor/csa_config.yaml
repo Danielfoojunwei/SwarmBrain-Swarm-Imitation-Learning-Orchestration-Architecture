@@ -1,0 +1,87 @@
+# Cooperative Skill Artifact (CSA) Configuration
+
+# CSA workspace configuration
+workspace:
+  base_dir: "./robot_control/skills/csa"
+  models_dir: "./robot_control/skills/csa/models"
+  checkpoints_dir: "./robot_control/skills/csa/checkpoints"
+  cache_dir: "./robot_control/skills/csa/cache"
+
+# CSA registry configuration
+registry:
+  url: "http://localhost:8082"
+  api_version: "v1"
+  timeout: 30  # seconds
+  retry_attempts: 3
+
+# Loaded CSAs
+csas:
+  # Example cooperative lifting task
+  - csa_id: "cooperative_lift_v1"
+    path: "./robot_control/skills/csa/models/cooperative_lift_v1.tar.gz"
+    num_actors: 2
+    roles:
+      leader: "LEADER"
+      follower: "FOLLOWER"
+    coordination_mode: "hierarchical"
+    task_phases:
+      - "approach"
+      - "grasp"
+      - "lift"
+      - "transfer"
+      - "place"
+      - "retreat"
+    safety_envelope:
+      min_separation: 0.5  # meters
+      max_relative_velocity: 0.3  # m/s
+      max_force: 100.0  # Newtons
+      workspace_bounds:
+        x_min: -2.0
+        x_max: 2.0
+        y_min: -2.0
+        y_max: 2.0
+        z_min: 0.0
+        z_max: 2.0
+
+  # Example multi-robot assembly task
+  - csa_id: "assembly_task_v1"
+    path: "./robot_control/skills/csa/models/assembly_task_v1.tar.gz"
+    num_actors: 3
+    roles:
+      leader: "LEADER"
+      support: "SUPPORT"
+      monitor: "MONITOR"
+    coordination_mode: "dynamic"
+    task_phases:
+      - "approach"
+      - "align"
+      - "assemble"
+      - "verify"
+      - "retreat"
+    safety_envelope:
+      min_separation: 0.6
+      max_relative_velocity: 0.2
+      formation_type: "triangle"
+
+# Safety configuration
+safety:
+  enable_checks: true
+  emergency_stop_on_violation: true
+  log_violations: true
+  min_separation_global: 0.5  # meters
+  max_relative_velocity_global: 0.3  # m/s
+
+# Coordination configuration
+coordination:
+  update_rate: 10  # Hz
+  intent_prediction_enabled: true
+  formation_control_enabled: true
+  dynamic_role_switching: true
+
+# Execution configuration
+execution:
+  device: "cpu"  # or "cuda"
+  batch_size: 1
+  confidence_threshold: 0.7  # Min confidence to execute action
+  max_retries: 3
+  timeout_per_phase: 60  # seconds

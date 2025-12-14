@@ -320,6 +320,116 @@ services:
     profiles:
       - industrial
 
+  # ==========================================================================
+  # MULTI-ACTOR INTEGRATION SERVICES
+  # ==========================================================================
+
+  # OpenFL Coordinator - Multi-actor federated learning
+  openfl-coordinator:
+    build:
+      context: ./external/multi_actor
+      dockerfile: ../../docker/Dockerfile.openfl
+    container_name: swarm_openfl_coordinator
+    ports:
+      - "8081:8081"  # OpenFL coordinator API
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+      - DATABASE_URL=postgresql://swarm:swarm@postgres:5432/swarmdb
+      - CSA_REGISTRY_URL=http://csa-registry:8082
+      - WORKSPACE_DIR=/workspace/openfl
+    volumes:
+      - ./external/multi_actor:/workspace/multi_actor
+      - ./learning/swarm_workspace/multi_actor:/workspace/openfl
+      - ./config/multi_actor:/workspace/config
+    networks:
+      - swarm-network
+    depends_on:
+      - postgres
+      - csa-registry
+    profiles:
+      - multi-actor
+
+  # CSA Registry - Cooperative Skill Artifact registry
+  csa-registry:
+    build:
+      context: ./external/multi_actor
+      dockerfile: ../../docker/Dockerfile.csa-registry
+    container_name: swarm_csa_registry
+    ports:
+      - "8082:8082"  # FastAPI REST API
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+      - DATABASE_URL=postgresql://swarm:swarm@postgres:5432/csadb
+      - CSA_STORAGE_DIR=/workspace/csa_storage
+      - SIGNING_ENABLED=true
+    volumes:
+      - ./external/multi_actor/services/registry:/workspace/registry
+      - csa-storage:/workspace/csa_storage
+      - ./config/multi_actor:/workspace/config
+    networks:
+      - swarm-network
+    depends_on:
+      - postgres
+    profiles:
+      - multi-actor
+
+  # SwarmBridge - Unified FL coordinator (Flower + OpenFL)
+  swarm-bridge:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.swarm-bridge
+    container_name: swarm_bridge
+    ports:
+      - "8083:8083"  # SwarmBridge API
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+      - FLOWER_SERVER=fl-server:8080
+      - OPENFL_COORDINATOR=openfl-coordinator:8081
+      - CSA_REGISTRY=http://csa-registry:8082
+      - WORKSPACE_DIR=/workspace/swarm_workspace
+    volumes:
+      - ./integration/multi_actor_adapter:/workspace/integration
+      - ./learning/swarm_workspace:/workspace/swarm_workspace
+      - ./config/multi_actor:/workspace/config
+    networks:
+      - swarm-network
+    depends_on:
+      - fl-server
+      - openfl-coordinator
+      - csa-registry
+    profiles:
+      - multi-actor
+
+  # Multi-Actor Orchestrator - Extended orchestrator with CSA support
+  multi-actor-orchestrator:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.multi-actor-orchestrator
+    container_name: swarm_multi_actor_orchestrator
+    ports:
+      - "8084:8084"  # Multi-actor orchestrator API
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+      - CSA_WORKSPACE=/workspace/csa
+      - CAPABILITIES_FILE=/workspace/config/robot_capabilities.json
+      - CSA_REGISTRY_URL=http://csa-registry:8082
+    volumes:
+      - ./orchestrator:/workspace/orchestrator
+      - ./integration/multi_actor_adapter:/workspace/integration
+      - ./robot_control/skills/csa:/workspace/csa
+      - ./config/multi_actor:/workspace/config
+    networks:
+      - swarm-network
+    depends_on:
+      - csa-registry
+      - orchestrator
+    profiles:
+      - multi-actor
+
 networks:
   swarm-network:
     driver: bridge
@@ -336,3 +446,4 @@ volumes:
   influxdb-data:
   influxdb-config:
   chronograf-data:
+  csa-storage:  # CSA artifact storage for multi-actor integration

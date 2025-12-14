@@ -1,0 +1,78 @@
+{
+  "robots": [
+    {
+      "robot_id": "robot_1",
+      "strength": 0.9,
+      "dexterity": 0.6,
+      "perception": 0.7,
+      "speed": 0.8,
+      "reach": 1.2,
+      "payload": 15.0,
+      "available": true,
+      "battery": 0.95,
+      "metadata": {
+        "type": "heavy_duty",
+        "manufacturer": "BostonDynamics",
+        "model": "Atlas"
+      }
+    },
+    {
+      "robot_id": "robot_2",
+      "strength": 0.6,
+      "dexterity": 0.9,
+      "perception": 0.8,
+      "speed": 0.7,
+      "reach": 1.0,
+      "payload": 8.0,
+      "available": true,
+      "battery": 0.88,
+      "metadata": {
+        "type": "precision",
+        "manufacturer": "UniversalRobots",
+        "model": "UR10e"
+      }
+    },
+    {
+      "robot_id": "robot_3",
+      "strength": 0.5,
+      "dexterity": 0.7,
+      "perception": 0.95,
+      "speed": 0.6,
+      "reach": 0.9,
+      "payload": 5.0,
+      "available": true,
+      "battery": 0.92,
+      "metadata": {
+        "type": "perception",
+        "manufacturer": "Clearpath",
+        "model": "Ridgeback"
+      }
+    },
+    {
+      "robot_id": "robot_4",
+      "strength": 0.7,
+      "dexterity": 0.7,
+      "perception": 0.7,
+      "speed": 0.9,
+      "reach": 1.1,
+      "payload": 10.0,
+      "available": true,
+      "battery": 0.85,
+      "metadata": {
+        "type": "balanced",
+        "manufacturer": "Fetch",
+        "model": "Freight"
+      }
+    }
+  ],
+  "default_capabilities": {
+    "strength": 0.5,
+    "dexterity": 0.5,
+    "perception": 0.5,
+    "speed": 0.5,
+    "reach": 1.0,
+    "payload": 10.0,
+    "available": true,
+    "battery": 1.0
+  }
+}

@@ -1,0 +1,124 @@
+# SwarmBridge Unified FL Configuration
+
+# Swarm bridge settings
+swarm_bridge:
+  workspace_dir: "./learning/swarm_workspace"
+
+  # FL server addresses
+  flower_server: "localhost:8080"  # Single-actor FL (Flower)
+  openfl_coordinator: "localhost:8081"  # Multi-actor FL (OpenFL)
+  csa_registry: "http://localhost:8082"  # CSA registry service
+
+# Federated learning modes
+learning_modes:
+  default: "hybrid"  # single_actor, multi_actor, or hybrid
+
+  # Single-actor (dynamical_2) configuration
+  single_actor:
+    framework: "flower"
+    min_clients: 2
+    max_clients: 10
+    rounds: 100
+
+  # Multi-actor (CSA) configuration
+  multi_actor:
+    framework: "openfl"
+    min_sites: 2
+    max_sites: 8
+    rounds: 50
+
+# Privacy modes
+privacy:
+  default_mode: "dp_sgd"  # none, ldp, dp_sgd, he, fhe, secure_agg
+
+  # Local Differential Privacy (LDP)
+  ldp:
+    epsilon: 1.0
+    sensitivity: 1.0
+    mechanism: "laplace"  # laplace or gaussian
+
+  # Differential Privacy SGD (DP-SGD)
+  dp_sgd:
+    epsilon: 1.0
+    delta: 1e-5
+    noise_multiplier: 1.1
+    max_grad_norm: 1.0
+
+  # Homomorphic Encryption (HE/FHE)
+  he:
+    scheme: "CKKS"  # BFV or CKKS
+    poly_modulus_degree: 8192
+    coeff_modulus: [60, 40, 40, 60]
+    scale: 40
+
+  # Secure Aggregation (SwarmBrain dropout-resilient)
+  secure_agg:
+    threshold_ratio: 0.4  # Tolerate 40% dropouts
+    use_shamir: true
+    use_prg: true
+
+# Aggregation strategies
+aggregation:
+  default_strategy: "trimmed_mean"  # mean, weighted_mean, trimmed_mean, median, krum, secure_agg
+
+  trimmed_mean:
+    trim_ratio: 0.1  # Remove top/bottom 10%
+
+  krum:
+    num_neighbors: 3  # Number of nearest neighbors to consider
+
+  weighted_mean:
+    weight_by: "data_size"  # data_size, loss, or custom
+
+# Round configuration
+rounds:
+  default_config:
+    timeout: 3600  # seconds
+    min_participants: 2
+    max_participants: 10
+    staleness_tolerance: 1  # Max rounds a site can lag
+
+  # Round templates
+  templates:
+    quick_test:
+      timeout: 600
+      min_participants: 2
+      max_participants: 5
+
+    production:
+      timeout: 7200
+      min_participants: 5
+      max_participants: 20
+
+    high_privacy:
+      privacy_mode: "fhe"
+      aggregation_strategy: "secure_agg"
+      timeout: 10800
+
+# Site management
+sites:
+  auto_register: true
+  heartbeat_interval: 60  # seconds
+  max_inactive_time: 300  # seconds before marking site as inactive
+
+  # Site types
+  site_types:
+    - factory
+    - lab
+    - edge
+    - cloud
+
+# Monitoring and logging
+monitoring:
+  enable_telemetry: true
+  metrics_port: 9090  # Prometheus metrics
+  log_level: "INFO"
+  log_rounds: true
+  log_aggregations: true
+
+# CSA integration
+csa_integration:
+  auto_package: true  # Automatically package multi-actor updates as CSA
+  versioning: "semantic"  # semantic or timestamp
+  signing_enabled: true
+  checksum_algorithm: "sha256"
